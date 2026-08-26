@@ -1,4 +1,5 @@
 import { useState } from "react"
+import "./App.css"
 
 // ["+", "-", "*", "/"] writing it like this means that the type is of list of all the 
 //element but i want to union 
@@ -68,7 +69,7 @@ function performOperation(a : number, b : number, ops : Operator) : number | nul
 
 }
 
-//this is the simplest number where I expect expression of tyep
+//this is the simplest number where I expect expression of type
 //number 1 (ops) number 2
 function performOps(expression: string): number | null {
     const n: number = expression.length;
@@ -113,36 +114,66 @@ function convertResult(result : number | null) : string{
 
 function Display({label} : DisplayProp){
   return(
-    <div>
+    <div className="display">
       {label}
     </div>
   )
 
 }
 
-function addNumberToDisplay(label : string, value : string, setVal : Function) {
+function addNumberToDisplay(label : string, value : string, setVal : (value : string) => void) {
   setVal(label + value);
 }
 
 function App(){
   const [value, setVal] = useState("");
-  return <div>
+  return <div className="calculator">
       <Display label = {value}/>
 
 
-      {buttons.map((button) => (
+      {/* {buttons.map((button) => (
           <button key = {button.value} onClick={() =>(addNumberToDisplay(value, button.value, setVal))}>
             {button.value}
           </button>
-        ))}
+        ))} */}
 
-      <button onClick={() => (setVal(convertResult(performOps(value))))}>
-        Calculate
-      </button>
+        {buttons.map((button) => {
+          switch (button.type) {
+            case "number":
+            case "operator":
+              return (
+              <button 
+                className= {`button_${button.type}`}
+                key = {button.value} 
+                onClick={() =>
+                  (addNumberToDisplay(value, button.value, setVal))
+                }
+              >
+                {button.value}
+              </button>
+              )
 
-      <button onClick={() => setVal("")}>
-        Clear
-      </button>
+            case "clear":
+              return (<button 
+                  className= {`button_${button.type}`}
+                  key={button.value}
+                  onClick={() => setVal("")}>
+                Clear
+              </button>)
+
+            case "equals":
+              return ( 
+                <button 
+                  className= {`button_${button.type}`}
+                  onClick={() => (setVal(convertResult(performOps(value))))}>
+                =
+              </button>)
+
+            default:
+              return null;
+          }
+        })}
+      
   </div>
 }
 

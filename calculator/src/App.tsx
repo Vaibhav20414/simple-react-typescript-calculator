@@ -41,72 +41,7 @@ const buttons: ButtonProps[] = [
   { value: "+", type: "operator", isOperator: true },
 ];
 
-function performOperation(a : number, b : number, ops : Operator) : number | null{
 
-  switch (ops) {
-
-    case "+":
-
-      return a + b;
-
-    case "-":
-
-      return a - b;
-
-    case "*":
-
-      return a*b;
-
-    case "/":
-
-      return (b == 0) ? null : a / b;
-
-    default:
-
-      return null;
-
-  }
-
-}
-
-//this is the simplest number where I expect expression of type
-//number 1 (ops) number 2
-function performOps(expression: string): number | null {
-    const n: number = expression.length;
-    let i: number = 0;
-
-    let a: number = 0;
-
-    // Read first number
-    while (
-        i < n &&
-        expression[i] >= "0" &&
-        expression[i] <= "9"
-    ) {
-        a *= 10;
-        a += Number(expression[i]);
-        i++;
-    }
-
-    // Read operator
-    const ops = expression[i] as Operator;
-    i++;
-
-    let b: number = 0;
-
-    // Read second number
-    while (
-        i < n &&
-        expression[i] >= "0" &&
-        expression[i] <= "9"
-    ) {
-        b *= 10;
-        b += Number(expression[i]);
-        i++;
-    }
-
-    return performOperation(a, b, ops);
-}
 
 function convertResult(result : number | null) : string{
   return result === null ? "Error" : String(result);
@@ -125,56 +60,95 @@ function addNumberToDisplay(label : string, value : string, setVal : (value : st
   setVal(label + value);
 }
 
-function App(){
+
+
+function App() {
   const [value, setVal] = useState("");
-  return <div className="calculator">
-      <Display label = {value}/>
+  const [loading, setLoading] = useState(false);
 
+  async function calculate() {
+    setLoading(true);
 
-      {/* {buttons.map((button) => (
-          <button key = {button.value} onClick={() =>(addNumberToDisplay(value, button.value, setVal))}>
-            {button.value}
-          </button>
-        ))} */}
+    try {
+      const response = await fetch(
+        "http://localhost:3000/api/calculations",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            expression: value,
+          }),
+        }
+      );
 
-        {buttons.map((button) => {
-          switch (button.type) {
-            case "number":
-            case "operator":
-              return (
-              <button 
-                className= {`button_${button.type}`}
-                key = {button.value} 
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error);
+      }
+
+      setVal(String(data.result));
+
+    } catch (error) {
+      setVal("Error");
+      console.error(error);
+
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="calculator">
+      <Display label={loading ? "Calculating..." : value} />
+
+      {buttons.map((button) => {
+        switch (button.type) {
+
+          case "number":
+          case "operator":
+            return (
+              <button
+                className={`button_${button.type}`}
+                key={button.value}
                 onClick={() =>
-                  (addNumberToDisplay(value, button.value, setVal))
+                  addNumberToDisplay(value, button.value, setVal)
                 }
               >
                 {button.value}
               </button>
-              )
+            );
 
-            case "clear":
-              return (<button 
-                  className= {`button_${button.type}`}
-                  key={button.value}
-                  onClick={() => setVal("")}>
+          case "clear":
+            return (
+              <button
+                className={`button_${button.type}`}
+                key={button.value}
+                onClick={() => setVal("")}
+              >
                 Clear
-              </button>)
+              </button>
+            );
 
-            case "equals":
-              return ( 
-                <button 
-                  className= {`button_${button.type}`}
-                  onClick={() => (setVal(convertResult(performOps(value))))}>
+          case "equals":
+            return (
+              <button
+                className={`button_${button.type}`}
+                key={button.value}
+                onClick={calculate}
+              >
                 =
-              </button>)
+              </button>
+            );
 
-            default:
-              return null;
-          }
-        })}
-      
-  </div>
+          default:
+            return null;
+        }
+      })}
+    </div>
+  );
 }
 
 export default App

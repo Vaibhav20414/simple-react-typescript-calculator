@@ -49,3 +49,15 @@
 .equals {
   background: lightgreen;
 }
+
+.history{
+  width: 300px;
+  margin: 50px auto;
+  padding: 20px;
+  border: 1px solid slateblue;
+  border-radius: 10px;
+}
+
+h2{
+  padding : 20px;
+}

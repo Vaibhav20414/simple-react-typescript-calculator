@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import "./App.css"
 
 // ["+", "-", "*", "/"] writing it like this means that the type is of list of all the 
@@ -41,11 +41,13 @@ const buttons: ButtonProps[] = [
   { value: "+", type: "operator", isOperator: true },
 ];
 
-
-
-function convertResult(result : number | null) : string{
-  return result === null ? "Error" : String(result);
+interface Calculation{
+  id:number;
+  expression: string;
+  result : number | null;
 }
+
+
 
 function Display({label} : DisplayProp){
   return(
@@ -65,6 +67,54 @@ function addNumberToDisplay(label : string, value : string, setVal : (value : st
 function App() {
   const [value, setVal] = useState("");
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<Calculation[]>([]);
+
+  const [searchId, setSearchId] = useState("");
+  const [calculation, setCalculation] = useState<Calculation | null>(null);
+  const [error, setError] = useState("");
+
+  async function getCalculation() {
+    setError("");
+    setCalculation(null);
+
+    try{
+      const response = await fetch(
+        `http://localhost:3000/api/calculations/${searchId}`
+    );
+
+    const data = await response.json();
+
+    if(!response.ok){
+      setError(data.error);
+      return;
+    }
+
+    setCalculation(data);
+  } catch(error) {
+    setError("Could not connect to server");
+    console.error(error);
+  }
+}
+
+  async function getHistory(){
+    try{
+      const response = await fetch(
+        `http://localhost:3000/api/calculations`
+      );
+
+      const data = await response.json();
+
+      if(!response.ok){
+        throw new Error(data.error);
+      }
+
+      console.log("history response:", data);
+      setHistory(data);
+    } catch(error) {
+      console.error(error);
+   }
+  }
+
 
   async function calculate() {
     setLoading(true);
@@ -101,7 +151,9 @@ function App() {
   }
 
   return (
-    <div className="calculator">
+    
+    <div>
+      <div  className="calculator">
       <Display label={loading ? "Calculating..." : value} />
 
       {buttons.map((button) => {
@@ -147,6 +199,49 @@ function App() {
             return null;
         }
       })}
+      </div>
+
+      <div className="history">
+        <h2>
+          History 
+        </h2> 
+
+        <button onClick={getHistory}>
+          Get History
+        </button>
+
+          {history.map((cal) => (
+            <div key = {cal.id}>
+              <span>
+                {cal.expression} = {cal.result}
+              </span>
+            </div>
+          ))}
+
+          <input
+            type="number"
+            value={searchId}
+            onChange={(e) => setSearchId(e.target.value)}
+            placeholder="Enter calculation ID"
+          />
+
+          <button onClick={getCalculation}>
+            Get Calculation
+          </button>
+
+          {error && (
+              <p>{error}</p>
+          )}
+
+          {calculation && (
+              <div>
+                  <p>ID: {calculation.id}</p>
+                  <p>
+                      {calculation.expression} = {calculation.result}
+                  </p>
+              </div>
+          )}
+      </div>
     </div>
   );
 }

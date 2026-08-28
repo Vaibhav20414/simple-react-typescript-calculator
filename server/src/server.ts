@@ -1,5 +1,14 @@
 import { error } from "node:console";
 import { createServer } from "node:http";
+import pool from "./db";
+
+pool.query("SELECT NOW()")
+    .then(result => {
+      console.log(result.rows);
+    })
+    .catch(error =>{
+      console.error(error);
+    });
 
 interface Calculation {
     id: number;
@@ -7,9 +16,7 @@ interface Calculation {
     result: number | null; 
 }
 
-const calculations: Calculation[] = [];
 
-let nextId = 1;
 
 type Operator = "+" | "-" | "*" | "/";
 function performOperation(a : number, b : number, ops : Operator) : number | null{
@@ -78,7 +85,7 @@ function performOps(expression: string): number | null {
 
     return performOperation(a, b, ops);
 }
-const server = createServer((req, res) =>{
+const server = createServer(async (req, res) => {
    console.log("REQUEST RECEIVED:", req.method, req.url);
   if(req.method == "GET" && req.url == "/hello"){
     res.writeHead(200,{
@@ -113,7 +120,7 @@ const server = createServer((req, res) =>{
       body += chunk;
     });
 
-    req.on("end", () => {
+    req.on("end", async () => {
       let data;
 
       try {
@@ -150,6 +157,13 @@ const server = createServer((req, res) =>{
 
       const ans = performOps(data.expression);
 
+      const result = await pool.query(
+          `INSERT INTO calculations (expression, result)
+          VALUES ($1, $2)
+          RETURNING *`,
+          [data.expression, ans]
+      );
+
 
       if (ans === null) {
     res.writeHead(400, {
@@ -165,35 +179,43 @@ const server = createServer((req, res) =>{
 
     return;
 }
-      //-----------------------------------------------------------------
-      //This part is should be coming from database
-        const calculation: Calculation = {
-        id: nextId++,
-        expression: data.expression,
-        result : ans 
-    };
-
-    calculations.push(calculation);
-
+      
         res.writeHead(201, {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "http://localhost:5173"
       });
 
-        res.end(JSON.stringify(calculation));
+        res.end(JSON.stringify(result.rows[0]));
 
         });
 
     return;
   }
 //Read of CRUD
-  if(req.method == "GET" && req.url == "/api/calculations/"){
-    res.writeHead(200, {
-      "Content-Type" : "application/json",
-      "access-control-allow-origin" : "http://localhost:5173"
-    });
+  if(req.method == "GET" && req.url == "/api/calculations"){
+     try {
+        const data = await pool.query(
+            "SELECT * FROM calculations"
+        );
 
-    res.end(JSON.stringify(calculations));
+        res.writeHead(200, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "http://localhost:5173"
+        });
+
+        res.end(JSON.stringify(data.rows));
+
+    } catch (error) {
+
+        res.writeHead(500, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "http://localhost:5173"
+        });
+
+        res.end(JSON.stringify({
+            error: "Database error"
+        }));
+    }
 
     return;
   }
@@ -203,153 +225,172 @@ const server = createServer((req, res) =>{
     req.url.split("/").pop()
   );
 
-  const calculation = calculations.find(cal => cal.id == id)
+  try {
+    const data = await pool.query(
+      `SELECT * FROM calculations
+      where id = $1`,
+      [id]
+    );
 
-  if(calculation === undefined){
-    res.writeHead(404, {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "http://localhost:5173"
-});
-
-res.end(JSON.stringify({
-    error: "Calculation not found"
-}));
-
-return;
-  } else {
-    res.writeHead(200, {
-      "content-type" : "application/json",
-      "access-control-allow-origin" : "http://localhost:5173"
-    });
-
-    res.end(JSON.stringify(calculation))
-  }
-}
-
-//Update of CRUD
-  if (req.method == "PATCH" && req.url?.startsWith("/api/calculations/")) {
-
-    const id = Number(req.url.split("/").pop());
-
-    const calculation = calculations.find(cal => cal.id == id);
-
-    // Check if calculation exists
-    if (!calculation) {
-        res.writeHead(404, {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "http://localhost:5173"
-        });
-
-        res.end(JSON.stringify({
-            error: "Calculation not found"
-        }));
-
-        return;
-    }
-
-    // Read request body
-    let body = "";
-
-    req.on("data", (chunk) => {
-        body += chunk;
-    });
-
-    req.on("end", () => {
-
-        // Parse JSON
-        let data;
-
-        try {
-            data = JSON.parse(body);
-        } catch {
-            res.writeHead(400, {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "http://localhost:5173"
-            });
-
-            res.end(JSON.stringify({
-                error: "Invalid JSON"
-            }));
-
-            return;
-        }
-
-        // Validate expression
-        if (typeof data.expression !== "string") {
-            res.writeHead(400, {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "http://localhost:5173"
-            });
-
-            res.end(JSON.stringify({
-                error: "Expression must be a string"
-            }));
-
-            return;
-        }
-
-        // Calculate new result
-        const result = performOps(data.expression);
-
-        if (result === null) {
-            res.writeHead(400, {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "http://localhost:5173"
-            });
-
-            res.end(JSON.stringify({
-                error: "Invalid calculation"
-            }));
-
-            return;
-        }
-
-        // Update existing resource
-        calculation.expression = data.expression;
-        calculation.result = result;
-
-        // Send updated resource
-        res.writeHead(200, {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "http://localhost:5173"
-        });
-
-        res.end(JSON.stringify(calculation));
-    });
-
-    return;
-}
-
-//DELETE of CRUD
-  if(req.method == "DELETE" && req.url?.startsWith("/api/calculations/")){
-    const id = Number(req.url.split("/").pop());
-
-    const index = calculations.findIndex(
-        cal => cal.id === id
-    )
-
-    if(index === -1){
+    if(data.rows.length === 0){
       res.writeHead(404, {
         "content-type" : "application/json",
         "access-control-allow-origin" : "http://localhost:5173"
       });
 
-      res.end(
-        JSON.stringify({
-          error : "Calculation not found"
-        })
-      );
+      res.end(JSON.stringify({
+        error : "Calucation not found"
+      }));
 
-      return;
-    } else {
-      calculations.splice(index, 1);
-
-      res.writeHead(204);
-      res.end();
-      
       return;
     }
+
+    res.writeHead(200, {
+      "content-type" : "application/json",
+      "access-control-allow-origin" : "http://localhost:5173"
+    });
+
+    res.end(JSON.stringify(data.rows[0]));
+  } catch (error) {
+    res.writeHead(500, {
+      "content-type" : "application/json",
+      "access-control-allow-origin" : "http://localhost:5173"
+    });
+
+    res.end(JSON.stringify({
+      error : "Database error"
+    }));
   }
+
+  return;
+}
+
+// //Update of CRUD
+//   if (req.method == "PATCH" && req.url?.startsWith("/api/calculations")) {
+
+//     const id = Number(req.url.split("/").pop());
+
+//     const calculation = calculations.find(cal => cal.id == id);
+
+//     // Check if calculation exists
+//     if (!calculation) {
+//         res.writeHead(404, {
+//             "Content-Type": "application/json",
+//             "Access-Control-Allow-Origin": "http://localhost:5173"
+//         });
+
+//         res.end(JSON.stringify({
+//             error: "Calculation not found"
+//         }));
+
+//         return;
+//     }
+
+//     // Read request body
+//     let body = "";
+
+//     req.on("data", (chunk) => {
+//         body += chunk;
+//     });
+
+//     req.on("end", async () => {
+
+//         // Parse JSON
+//         let data;
+
+//         try {
+//             data = JSON.parse(body);
+//         } catch {
+//             res.writeHead(400, {
+//                 "Content-Type": "application/json",
+//                 "Access-Control-Allow-Origin": "http://localhost:5173"
+//             });
+
+//             res.end(JSON.stringify({
+//                 error: "Invalid JSON"
+//             }));
+
+//             return;
+//         }
+
+//         // Validate expression
+//         if (typeof data.expression !== "string") {
+//             res.writeHead(400, {
+//                 "Content-Type": "application/json",
+//                 "Access-Control-Allow-Origin": "http://localhost:5173"
+//             });
+
+//             res.end(JSON.stringify({
+//                 error: "Expression must be a string"
+//             }));
+
+//             return;
+//         }
+
+//         // Calculate new result
+//         const result = performOps(data.expression);
+
+      
+
+//         if (result === null) {
+//             res.writeHead(400, {
+//                 "Content-Type": "application/json",
+//                 "Access-Control-Allow-Origin": "http://localhost:5173"
+//             });
+
+//             res.end(JSON.stringify({
+//                 error: "Invalid calculation"
+//             }));
+
+//             return;
+//         }
+
+//         // Update existing resource
+//         calculation.expression = data.expression;
+//         calculation.result = result;
+
+//         // Send updated resource
+//         res.writeHead(200, {
+//             "Content-Type": "application/json",
+//             "Access-Control-Allow-Origin": "http://localhost:5173"
+//         });
+
+//         res.end(JSON.stringify(calculation));
+//     });
+
+//     return;
+// }
+
+// //DELETE of CRUD
+//   if(req.method == "DELETE" && req.url?.startsWith("/api/calculations")){
+//     const id = Number(req.url.split("/").pop());
+
+//     const index = calculations.findIndex(
+//         cal => cal.id === id
+//     )
+
+//     if(index === -1){
+//       res.writeHead(404, {
+//         "content-type" : "application/json",
+//         "access-control-allow-origin" : "http://localhost:5173"
+//       });
+
+//       res.end(
+//         JSON.stringify({
+//           error : "Calculation not found"
+//         })
+//       );
+
+//       return;
+//     } else {
+//       calculations.splice(index, 1);
+
+//       res.writeHead(204);
+//       res.end();
+      
+//       return;
+//     }
+//   }
 
 
    res.writeHead(404,{

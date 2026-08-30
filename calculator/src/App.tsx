@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react"
 import "./App.css"
+import Auth from "./Auth";
+import type { User, Session } from "@supabase/supabase-js";
+import { supabase } from "./supabase";
 
 // ["+", "-", "*", "/"] writing it like this means that the type is of list of all the 
 //element but i want to union 
@@ -65,6 +68,38 @@ function addNumberToDisplay(label : string, value : string, setVal : (value : st
 
 
 function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+
+  useEffect(() => {
+  async function getSession() {
+    const { data } = await supabase.auth.getSession();
+
+    setSession(data.session);
+    setUser(data.session?.user ?? null);
+  }
+
+  getSession();
+}, []);
+
+useEffect(() => {
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange(
+    (_event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+    }
+  );
+
+  return () => {
+    subscription.unsubscribe();
+  };
+}, []);
+
+  async function logout() {
+    await supabase.auth.signOut();
+  }
   const [value, setVal] = useState("");
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<Calculation[]>([]);
@@ -72,6 +107,8 @@ function App() {
   const [searchId, setSearchId] = useState("");
   const [calculation, setCalculation] = useState<Calculation | null>(null);
   const [error, setError] = useState("");
+
+  
 
   async function getCalculation() {
     setError("");
@@ -96,28 +133,42 @@ function App() {
   }
 }
 
-  async function getHistory(){
-    try{
-      const response = await fetch(
-        `http://localhost:3000/api/calculations`
-      );
+async function getHistory() {
+  try {
 
-      const data = await response.json();
+    const accessToken = session?.access_token;
 
-      if(!response.ok){
-        throw new Error(data.error);
+    const response = await fetch(
+      "http://localhost:3000/api/calculations",
+      {
+        headers: {
+          "Authorization": `Bearer ${accessToken}`,
+        },
       }
+    );
 
-      console.log("history response:", data);
-      setHistory(data);
-    } catch(error) {
-      console.error(error);
-   }
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error);
+    }
+
+    console.log("history response:", data);
+
+    setHistory(data);
+
+  } catch (error) {
+    console.error(error);
   }
+}
 
 
   async function calculate() {
     setLoading(true);
+
+    const { data } = await supabase.auth.getSession();
+
+    const accessToken = data.session?.access_token;
 
     try {
       const response = await fetch(
@@ -126,6 +177,7 @@ function App() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "Authorization" : `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
             expression: value,
@@ -151,8 +203,15 @@ function App() {
   }
 
   return (
-    
     <div>
+      {user ? (
+        <div>
+          <h2>Welcome {user.email}</h2>
+
+          <button onClick={logout}>
+            Logout
+          </button>
+
       <div  className="calculator">
       <Display label={loading ? "Calculating..." : value} />
 
@@ -243,7 +302,14 @@ function App() {
           )}
       </div>
     </div>
+
+      ) : (
+        <Auth />
+      )}
+    </div>
   );
 }
 
 export default App
+
+

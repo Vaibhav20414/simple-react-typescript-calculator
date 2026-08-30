@@ -1,6 +1,7 @@
 import { error } from "node:console";
 import { createServer } from "node:http";
 import pool from "./db";
+import { supabase } from "./supabase";
 
 pool.query("SELECT NOW()")
     .then(result => {
@@ -46,9 +47,6 @@ function performOperation(a : number, b : number, ops : Operator) : number | nul
   }
 
 }
-
-//this is the simplest number where I expect expression of type
-//number 1 (ops) number 2
 function performOps(expression: string): number | null {
     const n: number = expression.length;
     let i: number = 0;
@@ -85,6 +83,8 @@ function performOps(expression: string): number | null {
 
     return performOperation(a, b, ops);
 }
+
+
 const server = createServer(async (req, res) => {
    console.log("REQUEST RECEIVED:", req.method, req.url);
   if(req.method == "GET" && req.url == "/hello"){
@@ -105,7 +105,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(204, {
         "Access-Control-Allow-Origin": "http://localhost:5173",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type"
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
     });
 
     res.end();
@@ -113,34 +113,65 @@ const server = createServer(async (req, res) => {
 }
 
 //Create of CRUD
-  if(req.method == "POST" && req.url == "/api/calculations"){
-    let body = "";
+if (req.method === "POST" && req.url === "/api/calculations") {
 
-    req.on("data", (chunk) => {
-      body += chunk;
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    res.writeHead(401, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "http://localhost:5173"
     });
 
-    req.on("end", async () => {
-      let data;
+    res.end(
+      JSON.stringify({
+        error: "Missing authorization header"
+      })
+    );
 
-      try {
-        data = JSON.parse(body);
-      } catch {
-        res.writeHead(400, {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "http://localhost:5173"
-        });
+    return;
+  }
 
-        res.end(
-          JSON.stringify({
-          error: "Invalid JSON"
-          })
-        );
+  const token = authHeader.split(" ")[1];
 
-        return;
-      }
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser(token);
 
-      if (typeof data.expression !== "string") {
+  if (error || !user) {
+    res.writeHead(401, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "http://localhost:5173"
+    });
+
+    res.end(
+      JSON.stringify({
+        error: "Invalid authentication"
+      })
+    );
+
+    return;
+  }
+
+  console.log("AUTHENTICATED USER:", user.id);
+
+  let body = "";
+
+  req.on("data", (chunk) => {
+    body += chunk;
+  });
+
+  req.on("end", async () => {
+
+    let data;
+
+    try {
+
+      data = JSON.parse(body);
+
+    } catch {
+
       res.writeHead(400, {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "http://localhost:5173"
@@ -148,122 +179,184 @@ const server = createServer(async (req, res) => {
 
       res.end(
         JSON.stringify({
-            error: "Expression must be a string"
+          error: "Invalid JSON"
         })
       );
 
       return;
-      }
+    }
 
-      const ans = performOps(data.expression);
+    if (typeof data.expression !== "string") {
 
-      const result = await pool.query(
-          `INSERT INTO calculations (expression, result)
-          VALUES ($1, $2)
-          RETURNING *`,
-          [data.expression, ans]
-      );
-
-
-      if (ans === null) {
-    res.writeHead(400, {
+      res.writeHead(400, {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "http://localhost:5173"
-    });
+      });
 
-    res.end(
+      res.end(
         JSON.stringify({
-            error: "Invalid calculation"
+          error: "Expression must be a string"
         })
-    );
-
-    return;
-}
-      
-        res.writeHead(201, {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "http://localhost:5173"
-      });
-
-        res.end(JSON.stringify(result.rows[0]));
-
-        });
-
-    return;
-  }
-//Read of CRUD
-  if(req.method == "GET" && req.url == "/api/calculations"){
-     try {
-        const data = await pool.query(
-            "SELECT * FROM calculations"
-        );
-
-        res.writeHead(200, {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "http://localhost:5173"
-        });
-
-        res.end(JSON.stringify(data.rows));
-
-    } catch (error) {
-
-        res.writeHead(500, {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "http://localhost:5173"
-        });
-
-        res.end(JSON.stringify({
-            error: "Database error"
-        }));
-    }
-
-    return;
-  }
-//Reading of one element 
-  if (req.method === "GET" && req.url?.startsWith("/api/calculations/")) {
-    const id = Number(
-    req.url.split("/").pop()
-  );
-
-  try {
-    const data = await pool.query(
-      `SELECT * FROM calculations
-      where id = $1`,
-      [id]
-    );
-
-    if(data.rows.length === 0){
-      res.writeHead(404, {
-        "content-type" : "application/json",
-        "access-control-allow-origin" : "http://localhost:5173"
-      });
-
-      res.end(JSON.stringify({
-        error : "Calucation not found"
-      }));
+      );
 
       return;
     }
 
-    res.writeHead(200, {
-      "content-type" : "application/json",
-      "access-control-allow-origin" : "http://localhost:5173"
+    const ans = performOps(data.expression);
+
+    if (ans === null) {
+
+      res.writeHead(400, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "http://localhost:5173"
+      });
+
+      res.end(
+        JSON.stringify({
+          error: "Invalid calculation"
+        })
+      );
+
+      return;
+    }
+
+    const result = await pool.query(
+      `INSERT INTO calculations (expression, result, user_id)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [data.expression, ans, user.id]
+    );
+
+    res.writeHead(201, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "http://localhost:5173"
     });
 
-    res.end(JSON.stringify(data.rows[0]));
-  } catch (error) {
-    res.writeHead(500, {
-      "content-type" : "application/json",
-      "access-control-allow-origin" : "http://localhost:5173"
+    res.end(JSON.stringify(result.rows[0]));
+  });
+
+  return;
+}
+
+
+//Read of CRUD
+if(req.method == "GET" && req.url == "/api/calculations"){
+
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+
+    res.writeHead(401, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "http://localhost:5173"
     });
 
     res.end(JSON.stringify({
-      error : "Database error"
+      error: "Missing authorization header"
+    }));
+
+    return;
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  const {
+    data: { user },
+    error
+  } = await supabase.auth.getUser(token);
+
+  if (error || !user) {
+
+    res.writeHead(401, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "http://localhost:5173"
+    });
+
+    res.end(JSON.stringify({
+      error: "Invalid authentication"
+    }));
+
+    return;
+  }
+
+  console.log("AUTHENTICATED USER:", user.id);
+
+  try {
+
+    const data = await pool.query(
+      `SELECT * FROM calculations
+       WHERE user_id = $1`,
+      [user.id]
+    );
+
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "http://localhost:5173"
+    });
+
+    res.end(JSON.stringify(data.rows));
+
+  } catch (error) {
+
+    console.error(error);
+
+    res.writeHead(500, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "http://localhost:5173"
+    });
+
+    res.end(JSON.stringify({
+      error: "Database error"
     }));
   }
 
   return;
 }
+// //Reading of one element 
+//   if (req.method === "GET" && req.url?.startsWith("/api/calculations/")) {
+//     const id = Number(
+//     req.url.split("/").pop()
+//   );
+
+//   try {
+//     const data = await pool.query(
+//       `SELECT * FROM calculations
+//       where id = $1`,
+//       [id]
+//     );
+
+//     if(data.rows.length === 0){
+//       res.writeHead(404, {
+//         "content-type" : "application/json",
+//         "access-control-allow-origin" : "http://localhost:5173"
+//       });
+
+//       res.end(JSON.stringify({
+//         error : "Calucation not found"
+//       }));
+
+//       return;
+//     }
+
+//     res.writeHead(200, {
+//       "content-type" : "application/json",
+//       "access-control-allow-origin" : "http://localhost:5173"
+//     });
+
+//     res.end(JSON.stringify(data.rows[0]));
+//   } catch (error) {
+//     res.writeHead(500, {
+//       "content-type" : "application/json",
+//       "access-control-allow-origin" : "http://localhost:5173"
+//     });
+
+//     res.end(JSON.stringify({
+//       error : "Database error"
+//     }));
+//   }
+
+//   return;
+// }
 
 // //Update of CRUD
 //   if (req.method == "PATCH" && req.url?.startsWith("/api/calculations")) {
@@ -406,6 +499,7 @@ const server = createServer(async (req, res) => {
   )
   return;
 })
+
 
 server.listen(3000, () => {
   console.log("Server running on http://localhost:3000");
